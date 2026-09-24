@@ -1,0 +1,15 @@
+
+[package]
+name = "game_dylib"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+first_proj = { path = "../game", default-features = false }
+
+[features]
+default = ["first_proj/default"]
+dylib-engine = ["first_proj/dylib-engine"]
