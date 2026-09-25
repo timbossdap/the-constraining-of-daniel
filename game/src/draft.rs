@@ -1,10 +1,10 @@
 //! Level-up draft: frozen 3-card upgrade picks (Vampire-Survivors style).
 
 use crate::{
-    player_class::CharacterClass,
     sim::GameInner,
     stats::AttrKind,
-    weapon_list::{Rarity, Weapon, WeaponArch, roll_loot},
+    gu::{GU, PATHS, gu_of_path_rank, gu_weapon, random_gu_rank},
+    weapon_list::{Rarity, Weapon, WeaponArch},
 };
 
 
@@ -14,15 +14,13 @@ pub(crate) enum DraftKind {
     Stat(AttrKind, u32),
     Heal(f32),
     Potions(u32),
-    ManaFull,
+    EssenceFull,
     Weapon(Weapon),
     Shield(f32),
     Combo(u32),
     Gold(u32),
-    /// Class evolution pick (checkpoint drafts).
-    Class(CharacterClass),
-    /// Paragon surge: stay your class, +2 all stats, full heal.
-    Surge,
+    /// Milestone boon: a specific Gu worm, granted + equipped on pick.
+    GuWorm(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -36,7 +34,7 @@ impl GameInner {
 
     /// Opens the next queued draft (freezes the game until picked).
     pub(crate) fn open_draft_if_needed(&mut self) {
-        if self.draft_open || self.class_open || self.draft_queue == 0 {
+        if self.draft_open || self.draft_queue == 0 {
             return;
         }
         self.draft_queue -= 1;
@@ -44,6 +42,7 @@ impl GameInner {
         self.gen_draft_cards();
         self.draft_open = true;
         self.draft_sel = 0;
+        self.draft_lock = 1.0;
         self.log("LEVEL UP! Pick an upgrade — game frozen.".to_string());
     }
 
@@ -69,35 +68,24 @@ impl GameInner {
         match idx {
             0 => DraftCard { title: "IRON ARMS".to_string(), desc: "+1 STR · phys · HP".to_string(), kind: DraftKind::Stat(AttrKind::Strength, 1) },
             1 => DraftCard { title: "SWIFT FEET".to_string(), desc: "+1 AGI · speed · dodge".to_string(), kind: DraftKind::Stat(AttrKind::Agility, 1) },
-            2 => DraftCard { title: "ARCANE MIND".to_string(), desc: "+1 INT · magic · mana".to_string(), kind: DraftKind::Stat(AttrKind::Intellect, 1) },
+            2 => DraftCard { title: "ARCANE MIND".to_string(), desc: "+1 INT · magic · essence".to_string(), kind: DraftKind::Stat(AttrKind::Intellect, 1) },
             3 => DraftCard { title: "OAK HEART".to_string(), desc: "+1 VIT · HP · regen".to_string(), kind: DraftKind::Stat(AttrKind::Vitality, 1) },
             4 => DraftCard { title: "LUCKY COIN".to_string(), desc: "+1 LUK · crit · loot".to_string(), kind: DraftKind::Stat(AttrKind::Luck, 1) },
             5 => DraftCard { title: "FEAST".to_string(), desc: "Heal 45% HP".to_string(), kind: DraftKind::Heal(0.45) },
             6 => DraftCard { title: "POTION BELT".to_string(), desc: "+1 potion · press H".to_string(), kind: DraftKind::Potions(1) },
-            7 => DraftCard { title: "MANA FONT".to_string(), desc: "Full mana".to_string(), kind: DraftKind::ManaFull },
+            7 => DraftCard { title: "ESSENCE FONT".to_string(), desc: "Full essence".to_string(), kind: DraftKind::EssenceFull },
             8 => DraftCard { title: "IRON SKIN".to_string(), desc: "+30 shield · 20s".to_string(), kind: DraftKind::Shield(30.0) },
             9 => DraftCard { title: "ADRENALINE".to_string(), desc: "+6 combo · more dmg".to_string(), kind: DraftKind::Combo(6) },
             10 => {
-                // weapon cache: always offers Rare or better
-                let mut s = self.next_seed();
-                let mut got: Option<Weapon> = None;
-                for _ in 0..8 {
-                    if let Some(cand) = roll_loot(self.player.kills + 10, self.player.base_attrs.luck + 3, s) {
-                        got = Some(cand);
-                        break;
-                    }
-                    s = s.wrapping_add(97);
-                }
-                let mut w = got.unwrap_or(Weapon {
+                // Gu cache: a rank 2-4 Gu from the great cycle, auto-firing
+                let s = self.next_seed();
+                let idx = random_gu_rank(2, 4, s);
+                let w = gu_weapon(idx, s).unwrap_or(Weapon {
                     name: "Rare Battlebrand".to_string(),
                     rarity: Rarity::Rare,
                     bonus_atk: 14.0,
                     arch: WeaponArch::Blade,
                 });
-                if matches!(w.rarity, Rarity::Common | Rarity::Magic) {
-                    w.rarity = Rarity::Rare;
-                    w.bonus_atk = (12.0 + (s % 8) as f32) * w.rarity.multiplier();
-                }
                 let title = w.name.clone();
                 let desc = format!("NEW: +{:.0} atk, auto-fires", w.bonus_atk);
                 DraftCard { title, desc, kind: DraftKind::Weapon(w) }
@@ -126,7 +114,7 @@ impl GameInner {
                 }
                 let d = self.player.derived();
                 self.player.hp = self.player.hp.min(d.max_hp);
-                self.player.mp = self.player.mp.min(d.max_mp);
+                self.player.essence = self.player.essence.min(d.max_essence);
             }
             DraftKind::Heal(frac) => {
                 let d = self.player.derived();
@@ -136,8 +124,8 @@ impl GameInner {
             DraftKind::Potions(n) => {
                 self.player.potions = (self.player.potions + n).min(9);
             }
-            DraftKind::ManaFull => {
-                self.player.mp = self.player.derived().max_mp;
+            DraftKind::EssenceFull => {
+                self.player.essence = self.player.derived().max_essence;
             }
             DraftKind::Weapon(w) => {
                 let label = self.equip_weapon(w);
@@ -156,10 +144,15 @@ impl GameInner {
             DraftKind::Gold(n) => {
                 self.player.gold += n;
             }
-            // Class/Surge cards belong to checkpoint drafts (apply_class).
-            // If one ever lands here, ignore it rather than crashing the pick.
-            DraftKind::Class(_) | DraftKind::Surge => {
-                return;
+            DraftKind::GuWorm(idx) => {
+                // milestone boon: the worm joins the body AND the hand
+                let got = self.player.grant_gu(idx);
+                let s = self.next_seed();
+                if let Some(w) = gu_weapon(idx, s) {
+                    self.equip_weapon(w);
+                }
+                self.log(format!("BOON: {} joins!", got));
+                self.burst(self.player_pos, (255, 220, 130), 14, 4.0, 0.6, 0.22);
             }
         }
         self.log(format!("Chosen: {}!", card.title));
@@ -169,107 +162,47 @@ impl GameInner {
         self.open_draft_if_needed();
     }
 
-    /// Checkpoint offers live in the same 3-card UI:
-    /// - Drifters (tier 0) pick 1 of 3 random base classes (first class).
-    /// - Base classes (tier 1) pick a 2-branch evolution or Paragon surge.
-    pub(crate) fn open_class_draft(&mut self) {
-        if self.class_open {
+    /// Milestone boon: choose 1 of 3 worms of your own path at the milestone
+    /// rank (rank 2 at Lv 5, 3 at 10, 4 at 15, 5 at 20, 6 at 25+). Thin global
+    /// pools fall back to any path so the cards always fill.
+    pub(crate) fn open_gu_boon(&mut self, rank: u8) {
+        if self.draft_open {
             return;
         }
-        let tier = self.player.class.tier();
-        let mut cards = Vec::new();
-        if tier == 0 {
-            let mut pool: Vec<usize> = (0..8).collect();
-            for _ in 0..3 {
-                if pool.is_empty() {
+        let path = self.path.unwrap_or(0);
+        let mut pool = gu_of_path_rank(path, rank);
+        if pool.len() < 3 {
+            for idx in 0..GU.len() {
+                if pool.len() >= 6 {
                     break;
                 }
-                let s = self.next_seed();
-                let c = CharacterClass::from_index(pool.remove((s as usize) % pool.len()));
-                cards.push(DraftCard {
-                    title: c.name().to_string(),
-                    desc: c.title().to_string(),
-                    kind: DraftKind::Class(c),
-                });
+                if GU[idx].rank == rank && !pool.contains(&idx) {
+                    pool.push(idx);
+                }
             }
-        } else {
-            for evo in self.player.class.evolutions() {
-                cards.push(DraftCard {
-                    title: evo.name().to_string(),
-                    desc: evo.title().to_string(),
-                    kind: DraftKind::Class(evo),
-                });
+        }
+        let mut cards = Vec::new();
+        for _ in 0..3 {
+            if pool.is_empty() {
+                break;
             }
+            let s = self.next_seed();
+            let idx = pool.remove((s as usize) % pool.len());
+            let def = &GU[idx];
             cards.push(DraftCard {
-                title: "PARAGON".to_string(),
-                desc: "+2 all stats · full heal".to_string(),
-                kind: DraftKind::Surge,
+                title: def.name.to_string(),
+                desc: format!("{} · rank {} {}", PATHS[def.path as usize].name, def.rank, def.desc),
+                kind: DraftKind::GuWorm(idx),
             });
         }
         if cards.is_empty() {
             return;
         }
         self.draft_cards = cards;
-        self.class_open = true;
+        self.draft_open = true;
         self.draft_sel = 0;
         self.draft_id += 1;
-        self.log("CHECKPOINT! Choose your evolution.".to_string());
+        self.draft_lock = 1.0;
+        self.log(format!("MILESTONE! Choose a rank-{rank} worm."));
     }
-
-    /// Applies a class evolution pick from the checkpoint cards: new base +
-    /// new growth curve, carrying every earned point above the old base.
-    /// Unspent points are untouched — spend them in the Tab menu.
-    /// Paragon surge instead: +2 all stats and a full heal, same class.
-    pub(crate) fn apply_class(&mut self, idx: usize) {
-        let Some(card) = self.draft_cards.get(idx).cloned() else {
-            return;
-        };
-        match card.kind {
-            DraftKind::Surge => {
-                let ba = &mut self.player.base_attrs;
-                ba.strength += 2;
-                ba.agility += 2;
-                ba.intellect += 2;
-                ba.vitality += 2;
-                ba.luck += 2;
-                let d = self.player.derived();
-                self.player.hp = d.max_hp;
-                self.player.mp = d.max_mp;
-                self.log("PARAGON SURGE! +2 all stats, fully healed.".to_string());
-                self.burst(self.player_pos, (255, 240, 150), 24, 6.0, 1.0, 0.28);
-            }
-            DraftKind::Class(c) => {
-                let old = self.player.class;
-                let m = self.player.level.saturating_sub(1);
-                let nb = c.base_attributes();
-                let ng = c.growth_per_level();
-                let ob = old.base_attributes();
-                let og = old.growth_per_level();
-                let carried = |new_base: u32, new_grow: u32, had: u32, old_base: u32, old_grow: u32| -> u32 {
-                    new_base + new_grow * m + had.saturating_sub(old_base + old_grow * m)
-                };
-                {
-                    let ba = &mut self.player.base_attrs;
-                    let had = *ba;
-                    ba.strength = carried(nb.strength, ng.strength, had.strength, ob.strength, og.strength);
-                    ba.agility = carried(nb.agility, ng.agility, had.agility, ob.agility, og.agility);
-                    ba.intellect = carried(nb.intellect, ng.intellect, had.intellect, ob.intellect, og.intellect);
-                    ba.vitality = carried(nb.vitality, ng.vitality, had.vitality, ob.vitality, og.vitality);
-                    ba.luck = carried(nb.luck, ng.luck, had.luck, ob.luck, og.luck);
-                }
-                self.player.class = c;
-                let d = self.player.derived();
-                self.player.hp = self.player.hp.min(d.max_hp);
-                self.player.mp = self.player.mp.min(d.max_mp);
-                self.log(format!("EVOLVED into {} — {}!", c.name(), c.title()));
-                self.burst(self.player_pos, (255, 240, 150), 24, 6.0, 1.0, 0.28);
-            }
-            _ => return,
-        }
-        self.draft_cards.clear();
-        self.class_open = false;
-        // leftover queued upgrade picks resolve after the evolution
-        self.open_draft_if_needed();
-    }
-
 }

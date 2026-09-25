@@ -1,8 +1,10 @@
-//! 8 playable classes + skills. Fun-first design: every class gets
-//! mobility + AoE early so it never feels like grind.
+//! The vessel (no classes anymore — everyone is a Drifter, worms are the
+//! build). The old class table stays as dead data for reference; only
+//! Drifter is ever constructed. Essence techniques live in `skills()`.
 
 use crate::stats::Attributes;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CharacterClass {
     Knight,
@@ -34,6 +36,7 @@ pub enum CharacterClass {
     Hexblade,
 }
 
+#[allow(dead_code)]
 impl CharacterClass {
     pub fn all() -> [CharacterClass; 8] {
         [
@@ -415,14 +418,13 @@ impl CharacterClass {
                 SkillDef::new("Rune Storm", "Spinning magic blades.", 20, 8.0, 1.9, 9, SkillKind::Whirlwind),
                 SkillDef::new("Starfall Blade", "Leap + meteor blades.", 30, 13.0, 3.4, 15, SkillKind::Meteor),
             ],
-            // Tier 0 starter: a stick, a rock, fast feet, deep breaths.
-            // Only the stick swing works at first — the rest are ??? until
-            // you pick your first real class at level 5.
+            // The vessel: no classes, no evolutions. Four essence techniques
+            // burn primeval essence instead of mana — worms are the build.
             CharacterClass::Drifter => [
-                SkillDef::basic("Stick Swing", "A stick. It works.", 0, 0.5, 0.8, SkillKind::Melee),
-                SkillDef::new("???", "Pick a class at Lv 5.", 0, 1.0, 0.0, 99, SkillKind::Projectile),
-                SkillDef::new("???", "Pick a class at Lv 5.", 0, 1.0, 0.0, 99, SkillKind::Dash),
-                SkillDef::new("???", "Pick a class at Lv 5.", 0, 1.0, 0.0, 99, SkillKind::Heal { fraction: 0.0 }),
+                SkillDef::basic("Essence Strike", "Essence-edged arc.", 15, 0.5, 1.6, SkillKind::Melee),
+                SkillDef::new("Spirit Barrage", "Worm-spit volley, huge AoE.", 30, 8.0, 2.2, 1, SkillKind::Barrage),
+                SkillDef::new("Stone Ward", "Essence ward, 40 shield.", 25, 10.0, 0.0, 1, SkillKind::Shield { amount: 40.0 }),
+                SkillDef::new("Mend Meridians", "Knit flesh with essence.", 35, 12.0, 0.0, 1, SkillKind::Heal { fraction: 0.3 }),
             ],
             // Tier 2 evolutions: sharper kits, all usable the moment you evolve.
             CharacterClass::Crusader => [
@@ -570,7 +572,7 @@ pub enum SkillKind {
 pub struct SkillDef {
     pub name: &'static str,
     pub desc: &'static str,
-    pub mana_cost: u32,
+    pub essence_cost: u32,
     pub cooldown: f32,
     pub power: f32,
     pub unlock_level: u32,
@@ -589,7 +591,7 @@ impl SkillDef {
         Self {
             name,
             desc,
-            mana_cost: mana,
+            essence_cost: mana,
             cooldown: cd,
             power,
             unlock_level: 1,
@@ -608,7 +610,7 @@ impl SkillDef {
         Self {
             name,
             desc,
-            mana_cost: mana,
+            essence_cost: mana,
             cooldown: cd,
             power,
             unlock_level: unlock,

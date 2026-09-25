@@ -1,6 +1,6 @@
 //! Combat math + loot. Juicy crits, executes, lifesteal — fun > grind.
 
-use crate::player_class::{CharacterClass, SkillKind};
+use crate::player_class::SkillKind;
 use crate::progression::PlayerCore;
 
 #[derive(Debug, Clone)]
@@ -32,11 +32,8 @@ pub fn player_attack_damage(player: &PlayerCore, skill_idx: usize, seed: u64) ->
     dmg *= player.class.passive().power;
     // inventory power (multiplicative with everything above)
     dmg *= player.item_totals().power_mult;
-    // across-the-board tuning cut (everyone EXCEPT the base Drifter, who
-    // stays exactly as weak as day one)
-    if !matches!(player.class, CharacterClass::Drifter) {
-        dmg *= 0.9;
-    }
+    // heirloom power from witnessed endings (rebirth reward)
+    dmg *= player.heirloom_mult;
     (dmg, s.kind.clone())
 }
 

@@ -178,7 +178,7 @@ impl Game {
         let (c1, c2) = self.inner.zone.palette();
         let menu_dim: f32 = if !self.inner.started {
             0.30
-        } else if self.inner.draft_open || self.inner.class_open || self.paused {
+        } else if self.inner.draft_open || self.paused || self.story_open {
             0.35
         } else {
             1.0
@@ -308,8 +308,8 @@ impl Game {
             return;
         };
         let t = self.inner.time;
-        // draft / class / menu / pause dim the WHOLE world so overlays pop
-        let dim: f32 = if self.inner.draft_open || self.inner.class_open || !self.inner.started || self.paused { 0.35 } else { 1.0 };
+        // draft / class / menu / pause / story dim the WHOLE world
+        let dim: f32 = if self.inner.draft_open || !self.inner.started || self.paused || self.story_open { 0.35 } else { 1.0 };
         let dc = |c: (u8, u8, u8)| col(darken(c, dim));
         let (ppx, ppy) = self.inner.player_pos;
         let facing = self.inner.facing;
@@ -463,7 +463,8 @@ impl Game {
             let nx = cx + (ppx - cx) * 0.25;
             let ny = cy + (ppy - cy) * 0.25;
             self.inner.cam_pos = (nx, ny);
-            let sh = self.inner.cam_shake;
+            // SHAKE toggle zeroes the trauma at render time (sim still tracks)
+            let sh = if self.shake_on { self.inner.cam_shake } else { 0.0 };
             let shx = if sh > 0.0 { (t * 70.0).sin() * sh * 0.25 } else { 0.0 };
             let shy = if sh > 0.0 { (t * 55.0).cos() * sh * 0.25 } else { 0.0 };
             c.local_transform_mut().set_position(Vector3::new(nx + shx, ny + shy, -10.0));
@@ -562,7 +563,7 @@ impl Game {
             let bobp = (t * 3.0 + i as f32 * 0.9).sin() * 0.12;
             let (c, sx, sy, ac, aox, aoy, asx, asy) = match pk.kind {
                 PickupKind::Heart => ((255, 80, 90), 0.55, 0.50, (255, 235, 235), -0.10, 0.10, 0.16, 0.14),
-                PickupKind::Mana => ((90, 150, 255), 0.48, 0.55, (200, 230, 255), 0.0, 0.14, 0.30, 0.12),
+                PickupKind::Essence => ((90, 150, 255), 0.48, 0.55, (200, 230, 255), 0.0, 0.14, 0.30, 0.12),
                 PickupKind::Gold => ((255, 210, 90), 0.42, 0.42, (255, 255, 240), 0.09, 0.09, 0.12, 0.12),
                 PickupKind::Bomb => ((60, 60, 70), 0.55, 0.55, (255, 150, 60), 0.0, 0.34, 0.14, 0.14),
                 PickupKind::Chest => ((190, 130, 70), 0.85, 0.65, (255, 220, 130), 0.0, 0.20, 0.70, 0.14),

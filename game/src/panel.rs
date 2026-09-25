@@ -4,15 +4,18 @@
 
 use fyrox::{
     asset::untyped::ResourceKind,
-    core::{math::Rect, pool::Handle, uuid::Uuid},
+    core::{algebra::Vector2, math::Rect, pool::Handle, uuid::Uuid},
     gui::{
         BuildContext,
+        border::{Border, BorderBuilder},
+        brush::Brush,
         nine_patch::{NinePatch, NinePatchBuilder},
         texture::{
             Texture, TextureKind, TextureMagnificationFilter, TexturePixelKind,
             TextureResource,
         },
         widget::WidgetBuilder,
+        Thickness,
     },
 };
 
@@ -150,6 +153,46 @@ pub(crate) fn patch_panel(
         .with_draw_center(true)
         .build(ctx)
 }
+
+/// Reference-look dark UI: near-black fill, thin light frame, plain separators.
+pub(crate) const DARK_BG: (u8, u8, u8) = (11, 12, 16);
+pub(crate) const DARK_FRAME: (u8, u8, u8) = (150, 155, 172);
+pub(crate) const DARK_SEP: (u8, u8, u8) = (95, 100, 115);
+/// Warm paper-white for headers, soft gray for body, dim gray for locked rows.
+pub(crate) const DARK_PAPER: (u8, u8, u8) = (235, 230, 220);
+pub(crate) const DARK_BODY: (u8, u8, u8) = (208, 208, 215);
+pub(crate) const DARK_DIM: (u8, u8, u8) = (130, 130, 145);
+pub(crate) const DARK_GOLD: (u8, u8, u8) = (255, 215, 90);
+pub(crate) const DARK_RED: (u8, u8, u8) = (255, 110, 100);
+
+/// Plain black panel with a thin light frame (no patch texture).
+pub(crate) fn dark_panel(ctx: &mut BuildContext, w: f32, h: f32) -> Handle<Border> {
+    BorderBuilder::new(
+        WidgetBuilder::new()
+            .with_width(w)
+            .with_height(h)
+            .with_desired_position(Vector2::new(0.0, 0.0))
+            .with_background(Brush::Solid(crate::util::col(DARK_BG)).into())
+            .with_foreground(Brush::Solid(crate::util::col(DARK_FRAME)).into())
+            .with_visibility(false),
+    )
+    .with_stroke_thickness(Thickness::uniform(2.0).into())
+    .build(ctx)
+}
+
+/// Horizontal 2px separator line.
+pub(crate) fn hsep(ctx: &mut BuildContext, w: f32) -> Handle<Border> {
+    BorderBuilder::new(
+        WidgetBuilder::new()
+            .with_width(w)
+            .with_height(2.0)
+            .with_desired_position(Vector2::new(0.0, 0.0))
+            .with_background(Brush::Solid(crate::util::col(DARK_SEP)).into())
+            .with_visibility(false),
+    )
+    .build(ctx)
+}
+
 
 /// Pixel-art heart containers (Isaac-style HP): full, half, empty.
 /// 7x6 pattern, doubled to 14x12, crisp nearest-neighbor sampling.

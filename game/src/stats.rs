@@ -40,7 +40,7 @@ impl fmt::Display for Attributes {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DerivedStats {
     pub max_hp: f32,
-    pub max_mp: f32,
+    pub max_essence: f32,
     pub phys_atk: f32,
     pub magic_atk: f32,
     pub defense: f32,
@@ -52,7 +52,7 @@ pub struct DerivedStats {
     /// 0.0 - 0.4
     pub dodge_chance: f32,
     pub hp_regen: f32,
-    pub mp_regen: f32,
+    pub essence_regen: f32,
 }
 
 impl DerivedStats {
@@ -64,8 +64,9 @@ impl DerivedStats {
         let l = base.luck as f32;
         let lvl = level as f32;
 
-        let max_hp = 20.0 + v * 6.0 + s * 1.0 + lvl * 4.0;
-        let max_mp = 30.0 + i * 10.0 + v * 2.0 + lvl * 3.0;
+        // frail vessels: low health, essence instead of mana
+        let max_hp = 12.0 + v * 3.0 + s * 0.5 + lvl * 2.0;
+        let max_essence = 60.0 + i * 3.0 + lvl * 4.0;
         let phys_atk = 5.0 + s * 1.8 + a * 0.9 + l * 0.3 + lvl * 1.0;
         let magic_atk = 5.0 + i * 2.0 + a * 0.4 + l * 0.4 + lvl * 1.0;
         let defense = 1.5 + v * 1.1 + s * 0.4 + lvl * 0.5;
@@ -74,11 +75,11 @@ impl DerivedStats {
         let crit_mult = 1.6 + l * 0.02;
         let dodge_chance = (a * 0.003 + l * 0.004).clamp(0.0, 0.4);
         let hp_regen = 0.5 + v * 0.12;
-        let mp_regen = 0.6 + i * 0.12;
+        let essence_regen = 2.5 + i * 0.15;
 
         Self {
             max_hp,
-            max_mp,
+            max_essence,
             phys_atk,
             magic_atk,
             defense,
@@ -87,7 +88,7 @@ impl DerivedStats {
             crit_mult,
             dodge_chance,
             hp_regen,
-            mp_regen,
+            essence_regen,
         }
     }
 }
@@ -126,7 +127,7 @@ impl AttrKind {
         match self {
             AttrKind::Strength => "+Phys Atk, +HP, +Defense",
             AttrKind::Agility => "+Speed, +Crit, +Dodge",
-            AttrKind::Intellect => "+Magic, +Mana, +Regen",
+            AttrKind::Intellect => "+Magic, +Essence, +Regen",
             AttrKind::Vitality => "+HP big, +Defense, +Regen",
             AttrKind::Luck => "+Crit dmg, +Crit, +Loot",
         }

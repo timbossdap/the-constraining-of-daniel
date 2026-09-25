@@ -1,4 +1,4 @@
-//! Pickups: hearts, mana, gold, bombs, chests, shrines.
+//! Pickups: hearts, essence, gold, bombs, chests, shrines.
 
 /// Pickups strewn around — anti-grind fun: free heals, bombs, magnets.
 #[derive(Debug, Clone)]
@@ -11,7 +11,7 @@ pub struct Pickup {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickupKind {
     Heart,
-    Mana,
+    Essence,
     Gold,
     Bomb,
     Chest,

@@ -117,3 +117,28 @@ pub(crate) fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
 pub(crate) fn pressed(input: &fyrox::engine::input::InputState, code: KeyCode, prev: &[KeyCode]) -> bool {
     input.is_key_down(code) && !prev.contains(&code)
 }
+
+/// Mouse for menus: hovering does NOTHING (no accidental selection);
+/// a fresh left-click both selects and confirms the row under the cursor.
+/// Rects are (x, y, w, h) in UI px — pass the same numbers the sync fns use.
+/// `clicked` is the once-per-frame fresh-press edge (see update()).
+/// NOTE: assumes UI px == window px (true at 100% display scaling).
+pub(crate) fn mouse_list(
+    input: &fyrox::engine::input::InputState,
+    rects: &[(f32, f32, f32, f32)],
+    sel: &mut usize,
+    clicked: bool,
+) -> Option<usize> {
+    if !clicked {
+        return None;
+    }
+    let mp = input.mouse_position();
+    let (mx, my) = (mp.x, mp.y);
+    for (i, &(x, y, w, h)) in rects.iter().enumerate() {
+        if mx >= x && mx <= x + w && my >= y && my <= y + h {
+            *sel = i;
+            return Some(i);
+        }
+    }
+    None
+}

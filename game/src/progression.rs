@@ -1,7 +1,7 @@
 //! XP curve, leveling, stat allocation. Designed "fun > grind":
 //! generous XP, 3 points/level, catch-up bonus, rest bonus.
 
-use crate::items::{ItemTotals, ITEMS};
+use crate::gu::{ItemTotals, GU};
 use crate::player_class::CharacterClass;
 use crate::stats::{AttrKind, Attributes, DerivedStats};
 
@@ -21,7 +21,7 @@ pub struct PlayerCore {
     pub base_attrs: Attributes,
     pub unspent_points: u32,
     pub hp: f32,
-    pub mp: f32,
+    pub essence: f32,
     /// extra buff timers
     pub shield_hp: f32,
     pub shield_timer: f32,
@@ -31,8 +31,14 @@ pub struct PlayerCore {
     pub potions: u32,
     pub gold: u32,
     pub kills: u32,
-    /// collected item indices into ITEMS (chest loot only)
+    /// collected Gu indices into GU (chest loot only)
     pub inventory: Vec<usize>,
+    /// heirloom power from completed endings (survives rebirth)
+    pub heirloom_mult: f32,
+    /// endings witnessed (survives rebirth)
+    pub endings: u32,
+    /// a set-synergy revive was already spent this life
+    pub revive_used: bool,
 }
 
 impl PlayerCore {
@@ -46,7 +52,7 @@ impl PlayerCore {
             base_attrs: base,
             unspent_points: 0,
             hp: d.max_hp,
-            mp: d.max_mp,
+            essence: d.max_essence,
             shield_hp: 0.0,
             shield_timer: 0.0,
             combo_count: 0,
@@ -56,11 +62,20 @@ impl PlayerCore {
             gold: 0,
             kills: 0,
             inventory: Vec::new(),
+            heirloom_mult: 1.0,
+            endings: 0,
+            revive_used: false,
         }
     }
 
     pub fn derived(&self) -> DerivedStats {
-        DerivedStats::from_attributes(&self.base_attrs, self.level)
+        let mut d = DerivedStats::from_attributes(&self.base_attrs, self.level);
+        // named set synergies widen the vessel itself (max HP, essence pool)
+        let t = self.item_totals();
+        d.max_hp *= t.max_hp_mult;
+        d.max_essence += t.essence_max_add;
+        d.essence_regen += t.essence_regen_add;
+        d
     }
 
     /// Summed-up inventory power (see items.rs). Read at every use site so
@@ -69,16 +84,16 @@ impl PlayerCore {
         ItemTotals::of_inventory(&self.inventory)
     }
 
-    /// Grants an item by table index: stat tonics land directly in base
+    /// Grants a Gu by table index: stat Gu land directly in base
     /// attributes, rule-benders join the inventory for ongoing effect.
     /// Returns the display name for logs.
-    pub fn grant_item(&mut self, idx: usize) -> String {
-        let Some(def) = ITEMS.get(idx) else {
+    pub fn grant_gu(&mut self, idx: usize) -> String {
+        let Some(def) = GU.get(idx) else {
             return "???".to_string();
         };
         let mut applied_stat: Option<String> = None;
         for fx in def.effects.iter().copied() {
-            if let crate::items::ItemEffect::Stat(kind, n) = fx {
+            if let crate::gu::ItemEffect::Stat(kind, n) = fx {
                 match kind {
                     AttrKind::Strength => self.base_attrs.strength += n,
                     AttrKind::Agility => self.base_attrs.agility += n,
@@ -94,7 +109,7 @@ impl PlayerCore {
         }
         let d = self.derived();
         self.hp = self.hp.min(d.max_hp);
-        self.mp = self.mp.min(d.max_mp);
+        self.essence = self.essence.min(d.max_essence);
         if let Some(s) = applied_stat {
             format!("{} ({s})", def.name)
         } else {
@@ -123,8 +138,8 @@ impl PlayerCore {
             self.xp -= self.xp_needed();
             self.level += 1;
             self.unspent_points += POINTS_PER_LEVEL;
-            // auto growth
-            let g = self.class.growth_per_level();
+            // flat vessel growth — no classes, worms are the build
+            let g = Attributes::new(1, 1, 1, 1, 1);
             self.base_attrs.strength += g.strength;
             self.base_attrs.agility += g.agility;
             self.base_attrs.intellect += g.intellect;
@@ -133,7 +148,7 @@ impl PlayerCore {
             // full-ish heal on level: fun!
             let d = self.derived();
             self.hp = (self.hp + d.max_hp * 0.35).min(d.max_hp);
-            self.mp = d.max_mp;
+            self.essence = d.max_essence;
             self.potions = (self.potions + 1).min(9);
             ups += 1;
         }
@@ -155,7 +170,7 @@ impl PlayerCore {
         // allocating VIT/STR immediately heals a bit — feels good
         let d = self.derived();
         self.hp = self.hp.min(d.max_hp);
-        self.mp = self.mp.min(d.max_mp);
+        self.essence = self.essence.min(d.max_essence);
         true
     }
 
@@ -184,7 +199,7 @@ impl PlayerCore {
         self.unspent_points += 1;
         let d = self.derived();
         self.hp = self.hp.min(d.max_hp);
-        self.mp = self.mp.min(d.max_mp);
+        self.essence = self.essence.min(d.max_essence);
         true
     }
     /// Smart auto-allocate for players who hate menus (press T).
@@ -260,7 +275,7 @@ impl PlayerCore {
         let d = self.derived();
         // regen
         self.hp = (self.hp + (d.hp_regen * self.class.passive().regen + self.item_totals().regen_add) * dt).min(d.max_hp);
-        self.mp = (self.mp + d.mp_regen * dt).min(d.max_mp);
+        self.essence = (self.essence + d.essence_regen * dt).min(d.max_essence);
         for cd in self.skill_cooldowns.iter_mut() {
             if *cd > 0.0 {
                 *cd -= dt;
@@ -318,7 +333,7 @@ impl PlayerCore {
         }
         self.potions -= 1;
         self.hp = (self.hp + d.max_hp * 0.45 * self.class.passive().potion * self.item_totals().potion_mult).min(d.max_hp);
-        self.mp = (self.mp + d.max_mp * 0.3).min(d.max_mp);
+        self.essence = (self.essence + d.max_essence * 0.3).min(d.max_essence);
         true
     }
 }
@@ -354,16 +369,16 @@ mod tests {
 
     #[test]
     fn item_totals_stack() {
-        use crate::items::ITEMS;
+        use crate::gu::GU;
         let mut p = PlayerCore::new(CharacterClass::Knight);
         let t0 = p.item_totals();
         assert_eq!(t0.power_mult, 1.0);
         assert_eq!(t0.homing, 0.0);
-        let tele = ITEMS.iter().position(|d| d.name == "Telepathy").unwrap();
-        let nail = ITEMS.iter().position(|d| d.name == "Rusty Nail").unwrap();
+        let tele = GU.iter().position(|d| d.name == "Mind Reading Gu").unwrap();
+        let nail = GU.iter().position(|d| d.name == "Qi Gathering Gu").unwrap();
         p.inventory.push(tele);
         assert_eq!(p.base_attrs.strength, 1); // everyone starts at base 1
-        let label = p.grant_item(nail);
+        let label = p.grant_gu(nail);
         assert!(label.contains("+1"));
         assert_eq!(p.base_attrs.strength, 2);
         let t = p.item_totals();

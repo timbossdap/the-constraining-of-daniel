@@ -8,6 +8,7 @@ use crate::{
     pickup::{Pickup, PickupKind},
     player_class::{CharacterClass, SkillKind},
     progression::PlayerCore,
+    story::StoryState,
     util::dist,
     weapon_list::Weapon,
     zone::{Zone, zone_enemies},
@@ -62,6 +63,15 @@ pub(crate) struct ArcSeg {
     pub(crate) color: (u8, u8, u8),
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Duel {
+    pub(crate) title: String,
+    pub(crate) reward_stones: u32,
+    pub(crate) reward_xp: u32,
+    pub(crate) reward_rank: u8,
+    pub(crate) started: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct GameInner {
     pub(crate) player: PlayerCore,
@@ -79,6 +89,14 @@ pub(crate) struct GameInner {
     pub(crate) boss_dead_timer: f32,
     pub(crate) boss_spawned_for_zone: bool,
     pub(crate) started: bool,
+    /// story sparring duel: one elite, no spawns, victor takes the purse
+    pub(crate) duel: Option<Duel>,
+    /// named synergy ids already heralded (the feed fires once each)
+    pub(crate) seen_syn: Vec<u16>,
+    /// cultivation saga state (path, sect, flags, stamina, endings...)
+    pub(crate) story: StoryState,
+    /// chosen Gu path (None until path select); survives death, not rebirth
+    pub(crate) path: Option<usize>,
     pub(crate) messages: Vec<String>,
     pub(crate) hud_timer: f32,
     pub(crate) attack_cd: f32,
@@ -88,11 +106,11 @@ pub(crate) struct GameInner {
     // level-up draft: game freezes while open, picks queue up
     pub(crate) draft_open: bool,
     pub(crate) draft_queue: u32,
+    /// input lockout after a draft opens (Space-holders don't insta-pick)
+    pub(crate) draft_lock: f32,
     pub(crate) draft_cards: Vec<DraftCard>,
     pub(crate) draft_sel: usize,
     pub(crate) draft_id: u32,
-    // class evolution at checkpoints (Drifter->class at 5, branch at 10+)
-    pub(crate) class_open: bool,
     pub(crate) dash_timer: f32,
     pub(crate) dash_cd: f32,
     pub(crate) dash_dir: (f32, f32),
@@ -131,7 +149,11 @@ impl Default for GameInner {
             boss_dead_timer: 0.0,
             boss_spawned_for_zone: false,
             started: false,
-            messages: vec!["YOU = the Drifter. Arrows/Space shoot. Reach Lv 5, pick a class.".to_string()],
+            duel: None,
+            seen_syn: Vec::new(),
+            story: StoryState::new(),
+            path: None,
+            messages: vec!["YOU = a vessel. Arrows/Space shoot. Z/X/C/V burn essence. Reach Lv 5 for a worm.".to_string()],
             hud_timer: 0.0,
             attack_cd: 0.0,
             hit_flash: 0.0,
@@ -139,10 +161,10 @@ impl Default for GameInner {
             hitstop: 0.0,
             draft_open: false,
             draft_queue: 0,
+            draft_lock: 0.0,
             draft_cards: Vec::new(),
             draft_sel: 0,
             draft_id: 0,
-            class_open: false,
             dash_timer: 0.0,
             dash_cd: 0.0,
             dash_dir: (1.0, 0.0),
@@ -238,14 +260,14 @@ impl GameInner {
             self.player.potions = (self.player.potions + 2).min(9);
             let d = self.player.derived();
             self.player.hp = d.max_hp;
-            self.player.mp = d.max_mp;
+            self.player.essence = d.max_essence;
             // sprinkle pickups
             for i in 0..6 {
                 let s = self.next_seed();
                 let a = ((s % 628) as f32) / 100.0;
                 self.pickups.push(Pickup {
                     pos: (a.cos() * (3.0 + i as f32), a.sin() * (3.0 + i as f32)),
-                    kind: if i % 3 == 0 { PickupKind::Heart } else if i % 3 == 1 { PickupKind::Gold } else { PickupKind::Mana },
+                    kind: if i % 3 == 0 { PickupKind::Heart } else if i % 3 == 1 { PickupKind::Gold } else { PickupKind::Essence },
                     bob: 0.0,
                 });
             }
@@ -253,6 +275,10 @@ impl GameInner {
     }
 
     pub(crate) fn spawn_wave(&mut self) {
+        // duels are single combat: no waves while the ring is set
+        if self.duel.is_some() {
+            return;
+        }
         let defs = zone_enemies(self.zone);
         let target = match self.zone {
             Zone::Meadow => 6,
@@ -284,9 +310,9 @@ impl GameInner {
         // ambient pickups
         if self.pickups.len() < 5 && self.next_seed() % 100 < 20 {
             let s = self.seed;
-            // ambient: hearts/mana/gold/bombs/shrines drift in, but never
+            // ambient: hearts/essence/gold/bombs/shrines drift in, but never
             // chests — those only fall from kills, rarely
-            let kinds = [PickupKind::Heart, PickupKind::Mana, PickupKind::Gold, PickupKind::Bomb, PickupKind::Shrine];
+            let kinds = [PickupKind::Heart, PickupKind::Essence, PickupKind::Gold, PickupKind::Bomb, PickupKind::Shrine];
             self.pickups.push(Pickup {
                 pos: (self.player_pos.0 + ((s % 17) as f32 - 8.0), self.player_pos.1 + ((s / 17 % 17) as f32 - 8.0)),
                 kind: kinds[(s as usize) % kinds.len()],
@@ -307,10 +333,10 @@ impl GameInner {
         if self.player.skill_cooldowns[idx] > 0.0 {
             return false;
         }
-        if (self.player.mp as u32) < sk.mana_cost {
+        if (self.player.essence as u32) < sk.essence_cost {
             return false;
         }
-        self.player.mp -= sk.mana_cost as f32;
+        self.player.essence -= sk.essence_cost as f32;
         self.player.skill_cooldowns[idx] = sk.cooldown;
         let seed = self.next_seed();
         let (mut dmg, kind) = player_attack_damage(&self.player, idx, seed);
@@ -717,19 +743,23 @@ impl GameInner {
         (self.facing, 0.0)
     }
 
-    /// Routes fresh level-ups: class evolution at 5 (first class) and 10+
-    /// (branch), upgrade drafts everywhere else. Multi-level jumps keep the
-    /// non-class picks queued behind the evolution.
+    /// Routes fresh level-ups: milestone levels (5/10/15/20/25/30) open
+    /// Gu-choice boons (rank 2 at 5 up to rank 6 at 25+), everything else
+    /// queues a normal upgrade draft. No classes — worms are the build.
     pub(crate) fn handle_level_ups(&mut self, ups: u32) {
         if ups == 0 {
             return;
         }
-        let tier = self.player.class.tier();
         let lvl = self.player.level;
-        let need_class = (tier == 0 && lvl >= 5) || (tier == 1 && lvl >= 10);
-        if need_class {
+        let mut boon: Option<u8> = None;
+        for crossed in lvl.saturating_sub(ups) + 1..=lvl {
+            if crossed % 5 == 0 && (5..=30).contains(&crossed) {
+                boon = Some(((crossed / 5) + 1).min(6) as u8);
+            }
+        }
+        if let Some(rank) = boon {
             self.draft_queue += ups.saturating_sub(1);
-            self.open_class_draft();
+            self.open_gu_boon(rank);
         } else {
             self.draft_queue += ups;
             self.open_draft_if_needed();
@@ -751,6 +781,11 @@ impl GameInner {
         self.player.kills += 1;
         self.kills_this_zone += 1;
         self.player.gold += ((e.gold as f32) * self.player.item_totals().gold_mult) as u32;
+        // kills distill primeval essence back into the aperture
+        {
+            let dmax = self.player.derived().max_essence;
+            self.player.essence = (self.player.essence + 3.0).min(dmax);
+        }
         // aegis-style items bank a shield on every kill
         let sk = self.player.item_totals().shield_kill;
         if sk > 0.0 {
@@ -858,5 +893,40 @@ mod tests {
         // battery ticks cooldowns even with no enemies, fires nothing
         g.tick_auto_weapons(0.5);
         assert!(g.projectiles.is_empty());
+    }
+
+    #[test]
+    fn milestone_opens_worm_boon() {
+        use crate::draft::DraftKind;
+        use crate::gu::GU;
+        let mut g = GameInner::default();
+        g.path = Some(7); // Blood
+        g.player.level = 5;
+        g.handle_level_ups(1);
+        assert!(g.draft_open, "milestone must open a draft");
+        assert_eq!(g.draft_cards.len(), 3);
+        for card in g.draft_cards.iter() {
+            match card.kind {
+                DraftKind::GuWorm(idx) => {
+                    let d = &GU[idx];
+                    assert_eq!(d.rank, 2, "Lv 5 boon is rank 2");
+                    assert_eq!(d.path, 7, "boon favors your path");
+                }
+                _ => panic!("milestone cards must all be worms"),
+            }
+        }
+        let n_inv = g.player.inventory.len();
+        g.apply_draft(0);
+        assert!(!g.draft_open);
+        assert!(g.player.inventory.len() > n_inv || g.loadout.len() == 1);
+    }
+
+    #[test]
+    fn plain_level_opens_upgrade_draft() {
+        let mut g = GameInner::default();
+        g.player.level = 6;
+        g.handle_level_ups(1);
+        assert!(g.draft_open);
+        assert_eq!(g.draft_cards.len(), 3);
     }
 }

@@ -3,7 +3,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rarity {
     Common,
-    Magic,
+    Uncommon,
     Rare,
     Epic,
     Legendary,
@@ -13,7 +13,7 @@ impl Rarity {
     pub fn multiplier(&self) -> f32 {
         match self {
             Rarity::Common => 1.0,
-            Rarity::Magic => 1.15,
+            Rarity::Uncommon => 1.15,
             Rarity::Rare => 1.35,
             Rarity::Epic => 1.6,
             Rarity::Legendary => 2.0,
@@ -22,19 +22,19 @@ impl Rarity {
     pub fn name(&self) -> &'static str {
         match self {
             Rarity::Common => "Common",
-            Rarity::Magic => "Magic",
+            Rarity::Uncommon => "Uncommon",
             Rarity::Rare => "Rare",
             Rarity::Epic => "Epic",
-            Rarity::Legendary => "LEGENDARY",
+            Rarity::Legendary => "Legendary",
         }
     }
     pub fn color(&self) -> (u8, u8, u8) {
         match self {
             Rarity::Common => (200, 200, 200),
-            Rarity::Magic => (120, 170, 255),
-            Rarity::Rare => (255, 220, 80),
+            Rarity::Uncommon => (110, 210, 120),
+            Rarity::Rare => (110, 170, 255),
             Rarity::Epic => (200, 120, 255),
-            Rarity::Legendary => (255, 120, 60),
+            Rarity::Legendary => (255, 210, 90),
         }
     }
 }
@@ -143,54 +143,4 @@ pub struct HoldPattern {
     pub dmg: f32,
     pub life: f32,
     pub cooldown: f32,
-}
-
-pub fn roll_loot(kills: u32, luck: u32, seed: u64) -> Option<Weapon> {
-    // Generous: ~18% base + luck. Legends exist — exciting!
-    let chance = 0.14 + (luck as f32) * 0.006 + (kills % 7) as f32 * 0.005;
-    let roll = ((seed % 1000) as f32) / 1000.0;
-    if roll > chance {
-        return None;
-    }
-    let r = (seed / 7) % 100;
-    let rarity = if r > 97 {
-        Rarity::Legendary
-    } else if r > 88 {
-        Rarity::Epic
-    } else if r > 70 {
-        Rarity::Rare
-    } else if r > 40 {
-        Rarity::Magic
-    } else {
-        Rarity::Common
-    };
-    let names = [
-        // blades
-        "Ember Fang", "Dawnbrand", "Oathkeeper", "Grave Song", "Kingsfall", "Wolfbite",
-        "Thornedge", "Duskreaver",
-        // bows
-        "Night Whisper", "Stormcaller", "Longshot", "Skystring", "Yew Oath", "Thornbow",
-        // staves
-        "Cinderbrand", "Frostbite", "Manaflux", "Starfall", "Oakheart", "Moonwell",
-        // daggers
-        "Backbiter", "Gloom Shiv", "Quiet Knife", "Widowfang", "Ratbite", "Pickpocket",
-        // mauls
-        "Doombringer", "Skullsplitter", "Oaken Maul", "Thunderclap", "Stonejaw", "Bellringer",
-        // axes
-        "Bloodmoon", "Splitter", "Timberfall", "Frostaxe", "Cinder Cleaver", "Rusty Hatchet",
-        // spears
-        "Dawnpiercer", "Longthorn", "Tidecaller", "Ashen Pike", "Crow's Beak", "Fenceline",
-        // oddities (common as mud, beloved anyway)
-        "Pointy Stick", "Spoon of Doom", "Cursed Croissant", "Lucky Rock", "Whisper Broom", "Frying Pan",
-    ];
-    let idx = (seed as usize) % names.len();
-    debug_assert_eq!(names.len(), 50);
-    let name = format!("{} {}", rarity.name(), names[idx]);
-    Some(Weapon {
-        name,
-        rarity,
-        // grows with your kill count so late-game drops stay relevant
-        bonus_atk: (4.0 + (seed % 12) as f32 + kills as f32 * 0.12) * rarity.multiplier(),
-        arch: WeaponArch::of_index(idx),
-    })
 }

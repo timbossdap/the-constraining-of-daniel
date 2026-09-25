@@ -6,6 +6,7 @@ use fyrox::{
     event::Event,
     graph::SceneGraph,
     gui::{border::Border, image::Image, message::UiMessage, nine_patch::NinePatch, text::Text, texture::TextureResource, UserInterface},
+    engine::input::Mouse,
     keyboard::KeyCode,
     material::MaterialResource,
     plugin::{Plugin, PluginContext, PluginRegistrationContext, error::GameResult},
@@ -13,14 +14,12 @@ use fyrox::{
 };
 use crate::{
     combat::player_attack_damage,
-    items::{ITEMS, random_item_of, roll_item_rarity},
+    gu::{GU, PATHS, gu_weapon, random_gu_of, random_gu_rank, rank_rarity, roll_item_rarity},
     pickup::PickupKind,
-    player_class::CharacterClass,
     progression::PlayerCore,
     sim::{FloatText, GameInner, Projectile},
     stats::AttrKind,
-    util::{dist, pressed},
-    weapon_list::{Weapon, roll_loot},
+    util::{dist, mouse_list, pressed, ui_scale, window_size},
     zone::Zone,
 };
 
@@ -216,7 +215,13 @@ pub struct Game {
     pub(crate) draft_title: Handle<Text>,
     #[visit(skip)]
     #[reflect(hidden)]
-    pub(crate) draft_cards_ui: Vec<Handle<Text>>,
+    pub(crate) draft_rarity: Vec<Handle<Text>>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) draft_names: Vec<Handle<Text>>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) draft_descs: Vec<Handle<Text>>,
     #[visit(skip)]
     #[reflect(hidden)]
     pub(crate) draft_panels: Vec<Handle<NinePatch>>,
@@ -262,9 +267,77 @@ pub struct Game {
     #[visit(skip)]
     #[reflect(hidden)]
     pub(crate) pause_sig: String,
+    pub(crate) settings_open: bool,
+    pub(crate) settings_sel: usize,
+    pub(crate) settings_title: Handle<Text>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) settings_rows: Vec<Handle<Text>>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) settings_row_bgs: Vec<Handle<NinePatch>>,
+    pub(crate) settings_hint: Handle<Text>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) settings_sig: String,
+    pub(crate) path_open: bool,
+    pub(crate) path_sel: usize,
+    pub(crate) path_title: Handle<Text>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) path_rows: Vec<Handle<Text>>,
+    pub(crate) path_hint: Handle<Text>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) path_sig: String,
+    pub(crate) story_open: bool,
+    pub(crate) story_sel: usize,
+    pub(crate) story_title: Handle<Text>,
+    pub(crate) story_body: Handle<Text>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) story_subs: Vec<Handle<Text>>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) story_rows: Vec<Handle<Text>>,
+    pub(crate) story_left_title: Handle<Text>,
+    pub(crate) story_left_body: Handle<Text>,
+    pub(crate) story_log: Handle<Text>,
+    pub(crate) story_status: Handle<Text>,
+    pub(crate) story_reinc: Handle<Text>,
+    pub(crate) story_left_bg: Handle<Border>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) story_cols_bg: Vec<Handle<Border>>,
+    pub(crate) story_log_bg: Handle<Border>,
+    pub(crate) story_status_bg: Handle<Border>,
+    pub(crate) story_body_bg: Handle<Border>,
+    /// Full-screen black behind the story hub (world + stars sit under it).
+    pub(crate) story_backdrop: Handle<Border>,
+    /// Sleep stamina bar under the chronicle (bg + fill).
+    pub(crate) story_sleep_bg: Handle<Border>,
+    pub(crate) story_sleep_fg: Handle<Border>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) story_seps: Vec<Handle<Border>>,
+    /// Starfield behind the story hub (tiny specks, UI space, z1).
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) story_stars: Vec<Handle<Border>>,
+    #[visit(skip)]
+    #[reflect(hidden)]
+    pub(crate) story_sig: String,
+    pub(crate) log_on: bool,
+    pub(crate) floaters_on: bool,
+    pub(crate) shake_on: bool,
     #[visit(skip)]
     #[reflect(hidden)]
     pub(crate) initialized: bool,
+    /// Fresh-click edge for the left mouse button, computed once per frame.
+    /// (Fyrox 1.0.1 never clears `pressed_buttons`, so the engine's
+    /// `is_left_mouse_button_pressed()` latches true forever after the
+    /// first click — every later hover would act as a click.)
+    pub(crate) prev_lmb: bool,
 }
 
 impl Default for Game {
@@ -366,7 +439,9 @@ impl Default for Game {
             hud_ui_on: true,
             font_scale: 0.0,
             draft_title: Handle::NONE,
-            draft_cards_ui: Vec::new(),
+            draft_rarity: Vec::new(),
+            draft_names: Vec::new(),
+            draft_descs: Vec::new(),
             draft_panels: Vec::new(),
             draft_golds: Vec::new(),
             draft_darks: Vec::new(),
@@ -390,7 +465,46 @@ impl Default for Game {
             pause_darks: Vec::new(),
             pause_hint: Handle::NONE,
             pause_sig: String::new(),
+            settings_open: false,
+            settings_sel: 0,
+            settings_title: Handle::NONE,
+            settings_rows: Vec::new(),
+            settings_row_bgs: Vec::new(),
+            settings_hint: Handle::NONE,
+            settings_sig: String::new(),
+            log_on: true,
+            floaters_on: true,
+            shake_on: true,
+            path_open: false,
+            path_sel: 0,
+            path_title: Handle::NONE,
+            path_rows: Vec::new(),
+            path_hint: Handle::NONE,
+            path_sig: String::new(),
+            story_open: false,
+            story_sel: 0,
+            story_title: Handle::NONE,
+            story_body: Handle::NONE,
+            story_subs: Vec::new(),
+            story_rows: Vec::new(),
+            story_left_title: Handle::NONE,
+            story_left_body: Handle::NONE,
+            story_log: Handle::NONE,
+            story_status: Handle::NONE,
+            story_reinc: Handle::NONE,
+            story_left_bg: Handle::NONE,
+            story_cols_bg: Vec::new(),
+            story_log_bg: Handle::NONE,
+            story_status_bg: Handle::NONE,
+            story_body_bg: Handle::NONE,
+            story_backdrop: Handle::NONE,
+            story_sleep_bg: Handle::NONE,
+            story_sleep_fg: Handle::NONE,
+            story_seps: Vec::new(),
+            story_stars: Vec::new(),
+            story_sig: String::new(),
             initialized: false,
+            prev_lmb: false,
         }
     }
 }
@@ -494,7 +608,9 @@ impl Clone for Game {
             hud_ui_on: self.hud_ui_on,
             font_scale: self.font_scale,
             draft_title: self.draft_title,
-            draft_cards_ui: self.draft_cards_ui.clone(),
+            draft_rarity: self.draft_rarity.clone(),
+            draft_names: self.draft_names.clone(),
+            draft_descs: self.draft_descs.clone(),
             draft_panels: self.draft_panels.clone(),
             draft_golds: self.draft_golds.clone(),
             draft_darks: self.draft_darks.clone(),
@@ -518,7 +634,46 @@ impl Clone for Game {
             pause_darks: self.pause_darks.clone(),
             pause_hint: self.pause_hint,
             pause_sig: self.pause_sig.clone(),
+            settings_open: self.settings_open,
+            settings_sel: self.settings_sel,
+            settings_title: self.settings_title,
+            settings_rows: self.settings_rows.clone(),
+            settings_row_bgs: self.settings_row_bgs.clone(),
+            settings_hint: self.settings_hint,
+            settings_sig: self.settings_sig.clone(),
+            path_open: self.path_open,
+            path_sel: self.path_sel,
+            path_title: self.path_title,
+            path_rows: self.path_rows.clone(),
+            path_hint: self.path_hint,
+            path_sig: self.path_sig.clone(),
+            story_open: self.story_open,
+            story_sel: self.story_sel,
+            story_title: self.story_title,
+            story_body: self.story_body,
+            story_subs: self.story_subs.clone(),
+            story_rows: self.story_rows.clone(),
+            story_left_title: self.story_left_title,
+            story_left_body: self.story_left_body,
+            story_log: self.story_log,
+            story_status: self.story_status,
+            story_reinc: self.story_reinc,
+            story_left_bg: self.story_left_bg,
+            story_cols_bg: self.story_cols_bg.clone(),
+            story_log_bg: self.story_log_bg,
+            story_status_bg: self.story_status_bg,
+            story_body_bg: self.story_body_bg,
+            story_backdrop: self.story_backdrop,
+            story_sleep_bg: self.story_sleep_bg,
+            story_sleep_fg: self.story_sleep_fg,
+            story_seps: self.story_seps.clone(),
+            story_stars: self.story_stars.clone(),
+            story_sig: self.story_sig.clone(),
+            log_on: self.log_on,
+            floaters_on: self.floaters_on,
+            shake_on: self.shake_on,
             initialized: self.initialized,
+            prev_lmb: self.prev_lmb,
         }
     }
 }
@@ -531,6 +686,239 @@ impl Game {
         self.inner = GameInner::default();
         self.inner.player = PlayerCore::new(c);
         self.inner.started = started;
+        self.paused = false;
+        self.stats_open = false;
+    }
+
+    /// Applies one story choice: costs, flags, rewards, gotos. Endings and
+    /// reincarnation route through full resets.
+    fn apply_story_choice(&mut self, node_id: &str, ch: &crate::story::Choice) {
+        // stamina cost comes off the top (checked before offering)
+        self.inner.story.stamina = (self.inner.story.stamina - ch.req.stamina as f32).max(0.0);
+        if ch.once {
+            self.inner.story.flags.insert(format!("done:{node_id}:{}", ch.label));
+        }
+        // bedding down keeps you asleep; ANY other action breaks it
+        let mut kept_sleep = false;
+        for fx in ch.effects.iter() {
+            match fx {
+                crate::story::StoryEffect::Stones(n) => {
+                    self.inner.player.gold = (self.inner.player.gold as i32 + n).max(0) as u32;
+                }
+                crate::story::StoryEffect::Xp(n) => {
+                    let ups = self.inner.player.add_xp(*n);
+                    self.inner.handle_level_ups(ups);
+                }
+                crate::story::StoryEffect::HealFull => {
+                    let d = self.inner.player.derived();
+                    self.inner.player.hp = d.max_hp;
+                    self.inner.player.essence = d.max_essence;
+                }
+                crate::story::StoryEffect::Flag(f) => {
+                    self.inner.story.flags.insert(f.clone());
+                }
+                crate::story::StoryEffect::Sect(s) => {
+                    self.inner.story.sect = s.clone();
+                }
+                crate::story::StoryEffect::Contrib(n) => {
+                    *self.inner.story.counters.entry("contrib".to_string()).or_insert(0) += n;
+                }
+                crate::story::StoryEffect::GrantGuRank(r) => {
+                    let s = self.inner.next_seed();
+                    let idx = crate::gu::random_gu_rank(*r, (*r).max(3), s);
+                    let got = self.inner.player.grant_gu(idx);
+                    if let Some(w) = crate::gu::gu_weapon(idx, s) {
+                        self.inner.equip_weapon(w);
+                    }
+                    self.inner.story.slog(format!("A Gu joins you: {got}."));
+                }
+                crate::story::StoryEffect::GrantPathGu { path, rank } => {
+                    // a worm of YOUR path answers: strongest it can be at this rank
+                    let s = self.inner.next_seed();
+                    let base = (*path as usize).min(11) * 30;
+                    let mut pool = Vec::new();
+                    for k in 0..30 {
+                        if let Some(d) = crate::gu::GU.get(base + k) {
+                            if d.rank <= *rank {
+                                pool.push(base + k);
+                            }
+                        }
+                    }
+                    if pool.is_empty() {
+                        pool.push(base);
+                    }
+                    let idx = pool[(s as usize) % pool.len()];
+                    let got = self.inner.player.grant_gu(idx);
+                    if let Some(w) = crate::gu::gu_weapon(idx, s) {
+                        self.inner.equip_weapon(w);
+                    }
+                    self.inner.story.slog(format!("A Gu joins you: {got}."));
+                }
+                crate::story::StoryEffect::Sleep => {
+                    kept_sleep = true;
+                    if !self.inner.story.sleeping {
+                        self.inner.story.sleeping = true;
+                        self.inner.story.slog("You bed down. The saga can wait.".to_string());
+                    }
+                }
+                crate::story::StoryEffect::Refine { rank } => {
+                    // the cauldron: three worms enter, one stronger leaves.
+                    // Craft resonance discounts the fuel, never below half.
+                    let r = (*rank).max(1).min(5);
+                    let disc = crate::gu::refine_discount(&self.inner.player.inventory);
+                    let stones = ((15 * r as u32) as f32 * disc) as u32;
+                    let ess = 10.0 * r as f32 * disc;
+                    let held_name = self.inner.held.name.clone();
+                    let mut take: Vec<usize> = Vec::new();
+                    for (pos, gi) in self.inner.player.inventory.iter().enumerate() {
+                        if take.len() >= 3 {
+                            break;
+                        }
+                        let same_rank = crate::gu::GU.get(*gi).map(|d| d.rank) == Some(r);
+                        let is_held = crate::gu::GU.get(*gi).map(|d| d.name) == Some(held_name.as_str());
+                        if same_rank && !is_held {
+                            take.push(pos);
+                        }
+                    }
+                    if take.len() < 3 {
+                        self.inner.story.slog(format!("The cauldron wants three rank-{r} worms (banked weapon spared)."));
+                    } else if self.inner.player.gold < stones {
+                        self.inner.story.slog(format!("Refining rank {r} costs {stones} stones."));
+                    } else if self.inner.player.essence < ess {
+                        self.inner.story.slog("The aperture runs dry — kill or rest for essence.".to_string());
+                    } else {
+                        self.inner.player.gold -= stones;
+                        self.inner.player.essence -= ess;
+                        take.sort_unstable_by(|a, b| b.cmp(a));
+                        let mut names = Vec::new();
+                        for pos in take {
+                            let gi = self.inner.player.inventory.remove(pos);
+                            if let Some(d) = crate::gu::GU.get(gi) {
+                                names.push(d.name.to_string());
+                            }
+                        }
+                        // strip their banked weapons too (no ghost attacks)
+                        let mut li = 0;
+                        while li < self.inner.loadout.len() {
+                            if names.iter().any(|n| *n == self.inner.loadout[li].name) {
+                                self.inner.loadout.remove(li);
+                                if li < self.inner.auto_cd.len() {
+                                    self.inner.auto_cd.remove(li);
+                                }
+                            } else {
+                                li += 1;
+                            }
+                        }
+                        // the ascendant: your path answers three times in five
+                        let s = self.inner.next_seed();
+                        let own = self.inner.path.unwrap_or(0);
+                        let idx = if s % 5 < 3 {
+                            let pool = crate::gu::gu_of_path_rank(own, r + 1);
+                            if pool.is_empty() {
+                                crate::gu::random_gu_rank(r + 1, r + 1, s)
+                            } else {
+                                pool[(s as usize) % pool.len()]
+                            }
+                        } else {
+                            crate::gu::random_gu_rank(r + 1, r + 1, s)
+                        };
+                        let got = self.inner.player.grant_gu(idx);
+                        if let Some(w) = crate::gu::gu_weapon(idx, s) {
+                            self.inner.equip_weapon(w);
+                        }
+                        self.inner.story.slog(format!("Refined: {got} rises from the cauldron."));
+                    }
+                }
+                crate::story::StoryEffect::Spar { foe, stones, xp, rank } => {
+                    // single combat: clear the field, heal up, ring one elite
+                    self.inner.enemies.clear();
+                    self.inner.projectiles.clear();
+                    {
+                        let d = self.inner.player.derived();
+                        self.inner.player.hp = d.max_hp;
+                        self.inner.player.essence = d.max_essence;
+                    }
+                    let lvl = self.inner.player.level + 1;
+                    let defs = crate::zone::zone_enemies(self.inner.zone);
+                    let s = self.inner.next_seed();
+                    let def = defs[(s as usize) % defs.len()].clone();
+                    let ang = ((s / 13 % 628) as f32) / 100.0;
+                    let mut e = crate::enemy::Enemy::spawn(&def, lvl, (ang.cos() * 6.0, ang.sin() * 6.0), s, false);
+                    e.elite = true;
+                    e.name = foe.to_string();
+                    e.max_hp *= 2.5;
+                    e.hp = e.max_hp;
+                    e.atk *= 1.5;
+                    self.inner.enemies.push(e);
+                    self.inner.duel = Some(crate::sim::Duel {
+                        title: foe.to_string(),
+                        reward_stones: *stones,
+                        reward_xp: *xp,
+                        reward_rank: *rank,
+                        started: true,
+                    });
+                    self.story_open = false;
+                    self.inner.started = true;
+                    self.inner.story.run_active = true;
+                    self.inner.spawn_timer = 2.0;
+                    self.inner.story.slog(format!("You step into the ring against {foe}."));
+                }
+                crate::story::StoryEffect::StartArena => {
+                    self.story_open = false;
+                    self.inner.started = true;
+                    self.inner.story.run_active = true;
+                    self.inner.spawn_timer = 0.0;
+                    self.inner.story.slog("You walk into the wilds, Gu humming.".to_string());
+                }
+                crate::story::StoryEffect::Reincarnate { bonus } => {
+                    self.do_reincarnate(*bonus);
+                }
+                crate::story::StoryEffect::Log(line) => {
+                    self.inner.story.slog(line.clone());
+                }
+            }
+        }
+        // travel (validated: every goto lands on a real node)
+        if crate::story::find_node(&crate::story::story_nodes(), ch.goto).is_some() {
+            self.inner.story.node = ch.goto.to_string();
+        }
+        if !kept_sleep {
+            self.inner.story.sleeping = false;
+        }
+        self.story_sel = 0;
+    }
+
+    /// Herald newly completed named synergies (once each per run).
+    fn poll_synergies(&mut self) {
+        let active = crate::synergy::active_synergies(&self.inner.player.inventory);
+        for s in active {
+            if !self.inner.seen_syn.contains(&s.id) {
+                self.inner.seen_syn.push(s.id);
+                let line = format!("SYNERGY COMPLETE: {} — {}", s.name, s.desc);
+                if self.story_open {
+                    self.inner.story.slog(line);
+                } else {
+                    self.inner.log(line);
+                }
+            }
+        }
+    }
+
+    /// True fresh start. Endings pay out heirloom power + witness count first;
+    /// the manual button pays nothing. Path is forgotten either way.
+    fn do_reincarnate(&mut self, bonus: bool) {
+        if bonus {
+            self.inner.player.heirloom_mult *= 1.05;
+            self.inner.player.endings += 1;
+        }
+        let (heir, ends) = (self.inner.player.heirloom_mult, self.inner.player.endings);
+        self.inner = GameInner::default();
+        self.inner.player.heirloom_mult = heir;
+        self.inner.player.endings = ends;
+        self.inner.started = false;
+        self.story_open = false;
+        self.path_open = true;
+        self.path_sel = 0;
         self.paused = false;
         self.stats_open = false;
     }
@@ -575,9 +963,19 @@ impl Plugin for Game {
             }
         }
         let prev = self.inner.prev_keys.clone();
+        // Fresh-click edge, computed ONCE per frame and shared by every menu:
+        // the engine's `is_left_mouse_button_pressed()` latches true forever
+        // after the first click (pressed_buttons is never cleared), so without
+        // this every hover acts as a click.
+        let lmb_down = input.is_mouse_button_down(Mouse::LEFT_BUTTON);
+        let lmb_click = lmb_down && !self.prev_lmb;
+        self.prev_lmb = lmb_down;
+        // named synergy completions herald once, wherever you are
+        self.poll_synergies();
 
-        // --- menu: idle world renders behind, sim waits for START ---
-        if !self.inner.started {
+        // --- menu: START begins a true fresh saga, CONTINUE resumes one ---
+        // (path select and story hub take over once a saga is in motion)
+        if !self.inner.started && !self.path_open && !self.story_open {
             // navigate: Up/Down or W/S
             if pressed(input, KeyCode::ArrowUp, &prev) || pressed(input, KeyCode::KeyW, &prev) {
                 self.menu_index = (self.menu_index + 2) % 3;
@@ -585,21 +983,40 @@ impl Plugin for Game {
             if pressed(input, KeyCode::ArrowDown, &prev) || pressed(input, KeyCode::KeyS, &prev) {
                 self.menu_index = (self.menu_index + 1) % 3;
             }
-            // menu: everyone starts a Drifter — first real class at level 5.
-            // (cycling is gone; the tree decides from here.)
-            if self.inner.player.class.tier() != 0 {
-                self.inner.player = PlayerCore::new(CharacterClass::Drifter);
-                self.inner.held = Weapon::rusty();
-                self.inner.loadout.clear();
-                self.inner.auto_cd.clear();
+            // NOTE: hands off self.inner here — a suspended saga waits under
+            // CONTINUE and must not be touched until START wipes it.
+            // confirm: Enter/Space/click
+            let mut clicked: Option<usize>;
+            {
+                let s = ui_scale(context);
+                let ws = window_size(context);
+                let mcx = ws.x * 0.5;
+                let mrows_y = ws.y * 0.34;
+                let rects: Vec<(f32, f32, f32, f32)> = (0..3)
+                    .map(|i| (mcx - 500.0 * s, mrows_y + i as f32 * 100.0 * s, 1000.0 * s, 64.0 * s))
+                    .collect();
+                clicked = mouse_list(input, &rects, &mut self.menu_index, lmb_click);
             }
-            // confirm: Enter/Space on START begins; on HELP toggles panel
             if pressed(input, KeyCode::Enter, &prev) || pressed(input, KeyCode::Space, &prev) {
-                if self.menu_index == 0 {
-                    self.inner.started = true;
-                    self.inner.log("the constraining of daniel begins! Arrows/Space attack.".to_string());
+                clicked = Some(self.menu_index);
+            }
+            if let Some(i) = clicked {
+                if i == 0 {
+                    // START: always a brand-new run (heirloom/endings meta kept,
+                    // everything else burned) straight into path select
+                    self.do_reincarnate(false);
                     self.set_menu_visible(context, false);
-                } else if self.menu_index == 2 {
+                } else if i == 1 {
+                    // CONTINUE: resume a suspended saga, if one exists
+                    if self.inner.path.is_some() {
+                        self.set_menu_visible(context, false);
+                        if self.inner.story.run_active {
+                            self.inner.started = true;
+                        } else {
+                            self.story_open = true;
+                        }
+                    }
+                } else if i == 2 {
                     self.menu_help_on = !self.menu_help_on;
                 }
             }
@@ -609,6 +1026,8 @@ impl Plugin for Game {
             self.sync_visuals(context);
             self.sync_floats(context);
             self.sync_menu(context);
+            self.sync_path(context);
+            self.sync_story(context);
             self.inner.hud_timer -= dt;
             if self.inner.hud_timer <= 0.0 {
                 self.update_hud(context);
@@ -617,13 +1036,80 @@ impl Plugin for Game {
             return Ok(());
         }
 
-        // --- level-up draft / class evolution: frozen, pick 1 of 3 ---
-        if self.inner.draft_open || self.inner.class_open {
-            // direct pick
+        // --- path select: twelve Gu paths, one soul. Starter Gu joins you. ---
+        if self.path_open {
+            if pressed(input, KeyCode::ArrowUp, &prev) || pressed(input, KeyCode::KeyW, &prev) {
+                self.path_sel = (self.path_sel + 11) % 12;
+            }
+            if pressed(input, KeyCode::ArrowDown, &prev) || pressed(input, KeyCode::KeyS, &prev) {
+                self.path_sel = (self.path_sel + 1) % 12;
+            }
             let mut pick: Option<usize> = None;
-            for (k, idx) in [(KeyCode::Digit1, 0), (KeyCode::Digit2, 1), (KeyCode::Digit3, 2)] {
+            for (k, idx) in [(KeyCode::Digit1, 0), (KeyCode::Digit2, 1), (KeyCode::Digit3, 2), (KeyCode::Digit4, 3), (KeyCode::Digit5, 4), (KeyCode::Digit6, 5), (KeyCode::Digit7, 6), (KeyCode::Digit8, 7), (KeyCode::Digit9, 8)] {
                 if pressed(input, k, &prev) {
                     pick = Some(idx);
+                }
+            }
+            if pressed(input, KeyCode::Enter, &prev) || pressed(input, KeyCode::Space, &prev) {
+                pick = Some(self.path_sel);
+            }
+            // mouse over the 12 path rows (same rects as sync_path)
+            {
+                let s = ui_scale(context);
+                let ws = window_size(context);
+                let rows_y = ws.y * 0.18;
+                let rects: Vec<(f32, f32, f32, f32)> = (0..12)
+                    .map(|i| (ws.x * 0.5 - 320.0 * s, rows_y + i as f32 * 40.0 * s, 640.0 * s, 36.0 * s))
+                    .collect();
+                if let Some(i) = mouse_list(input, &rects, &mut self.path_sel, lmb_click) {
+                    pick = Some(i.min(11));
+                }
+            }
+            if pressed(input, KeyCode::Escape, &prev) {
+                self.path_open = false;
+                self.set_menu_visible(context, true);
+            } else if let Some(i) = pick {
+                let pi = i.min(11);
+                self.inner.path = Some(pi);
+                // the path's rank-1 Gu crawls to your hand as your first weapon
+                let seed = self.inner.next_seed();
+                if let Some(w) = gu_weapon(pi * 30, seed) {
+                    self.inner.equip_weapon(w);
+                }
+                self.inner.story.slog(format!("You kowtow to the {} — no turning back.", PATHS[pi].name));
+                self.path_open = false;
+                self.story_open = true;
+            }
+            self.inner.prev_keys = down;
+            self.sync_ground_colors(context);
+            self.ensure_visuals(context);
+            self.sync_visuals(context);
+            self.sync_floats(context);
+            self.sync_path(context);
+            self.sync_story(context);
+            self.inner.hud_timer -= dt;
+            if self.inner.hud_timer <= 0.0 {
+                self.update_hud(context);
+                self.inner.hud_timer = 0.12;
+            }
+            return Ok(());
+        }
+
+        // --- level-up draft / milestone worm boon: frozen, pick 1 of 3 ---
+        if self.inner.draft_open {
+            // Fresh drafts lock selection for 1s: Space-holders mashing fire
+            // through the kill would otherwise insta-pick card 1. Nav stays free.
+            if self.inner.draft_lock > 0.0 {
+                self.inner.draft_lock -= dt;
+            }
+            let locked = self.inner.draft_lock > 0.0;
+            // direct pick
+            let mut pick: Option<usize> = None;
+            if !locked {
+                for (k, idx) in [(KeyCode::Digit1, 0), (KeyCode::Digit2, 1), (KeyCode::Digit3, 2)] {
+                    if pressed(input, k, &prev) {
+                        pick = Some(idx);
+                    }
                 }
             }
             // highlight cycle
@@ -633,15 +1119,31 @@ impl Plugin for Game {
             if pressed(input, KeyCode::ArrowRight, &prev) || pressed(input, KeyCode::KeyD, &prev) {
                 self.inner.draft_sel = (self.inner.draft_sel + 1) % 3;
             }
-            if pressed(input, KeyCode::Enter, &prev) || pressed(input, KeyCode::Space, &prev) {
+            if !locked && (pressed(input, KeyCode::Enter, &prev) || pressed(input, KeyCode::Space, &prev)) {
                 pick = Some(self.inner.draft_sel);
             }
-            if let Some(i) = pick {
-                if self.inner.class_open {
-                    self.inner.apply_class(i);
-                } else {
-                    self.inner.apply_draft(i);
+            // mouse: hover highlights, click picks (same cards as sync_draft)
+            {
+                let s = ui_scale(context);
+                let ws = window_size(context);
+                let cw: f32 = (460.0f32).min((ws.x - 96.0) / 3.0).max(200.0);
+                let gap = 24.0 * s;
+                let cards_y = ws.y * 0.19;
+                let x0 = ws.x * 0.5 - (3.0 * cw + 2.0 * gap) * 0.5;
+                let rects: Vec<(f32, f32, f32, f32)> = (0..3)
+                    .map(|i| {
+                        let px = x0 + i as f32 * (cw + gap);
+                        (px - 12.0 * s, cards_y - 12.0 * s, cw + 24.0 * s, 264.0 * s)
+                    })
+                    .collect();
+                if let Some(i) = mouse_list(input, &rects, &mut self.inner.draft_sel, lmb_click) {
+                    if !locked {
+                        pick = Some(i);
+                    }
                 }
+            }
+            if let Some(i) = pick {
+                self.inner.apply_draft(i);
             }
             self.inner.prev_keys = down;
             // frozen render (no sim ticks: enemies, arrows, particles all hold still)
@@ -650,6 +1152,8 @@ impl Plugin for Game {
             self.sync_visuals(context);
             self.sync_floats(context);
             self.sync_draft(context);
+            self.sync_path(context);
+            self.sync_story(context);
             self.inner.hud_timer -= dt;
             if self.inner.hud_timer <= 0.0 {
                 self.update_hud(context);
@@ -668,6 +1172,33 @@ impl Plugin for Game {
             }
             if pressed(input, KeyCode::ArrowDown, &prev) || pressed(input, KeyCode::KeyS, &prev) {
                 self.stats_sel = (self.stats_sel + 1) % 5;
+            }
+            // mouse: hover selects a row; click left third = -1, right third = +1
+            {
+                let s = ui_scale(context);
+                let ws = window_size(context);
+                let cx = ws.x * 0.5;
+                let py = ws.y * 0.25;
+                let mp = input.mouse_position();
+                for i in 0..5 {
+                    let rx = cx - 260.0 * s;
+                    let ry = py + (64.0 + i as f32 * 44.0) * s;
+                    let rw = 520.0 * s;
+                    let rh = 40.0 * s;
+                    // click-only (hover never selects): left third refunds,
+                    // right third spends, middle just highlights the row
+                    if mp.x >= rx && mp.x <= rx + rw && mp.y >= ry && mp.y <= ry + rh
+                        && lmb_click
+                    {
+                        self.stats_sel = i;
+                        let kind = AttrKind::all()[i];
+                        if mp.x < rx + rw / 3.0 {
+                            self.inner.player.deallocate(kind);
+                        } else if mp.x > rx + rw * 2.0 / 3.0 {
+                            self.inner.player.allocate(kind);
+                        }
+                    }
+                }
             }
             let kind = AttrKind::all()[self.stats_sel];
             // plus: = key, numpad +, or Right/D. minus: - key, numpad -, or Left/A.
@@ -715,27 +1246,92 @@ impl Plugin for Game {
             self.sync_visuals(context);
             self.sync_floats(context);
             self.sync_stats(context);
+            self.sync_path(context);
+            self.sync_story(context);
             self.inner.hud_timer -= dt;
             if self.inner.hud_timer <= 0.0 {
                 self.update_hud(context);
                 self.inner.hud_timer = 0.12;
             }
             return Ok(());
-        } else if pressed(input, KeyCode::Tab, &prev) && self.inner.started && !self.inner.draft_open && !self.inner.class_open {
+        } else if pressed(input, KeyCode::Tab, &prev) && self.inner.started && !self.inner.draft_open && !self.story_open && !self.path_open {
             self.stats_open = true;
             self.stats_sel = 0;
         }
 
-        // --- pause menu (Esc/P): frozen, resume / restart / quit ---
+        // --- pause menu (Esc/P): frozen, resume / settings / restart / quit ---
         if self.paused {
+            // settings overlay takes over input while open
+            if self.settings_open {
+                if pressed(input, KeyCode::ArrowUp, &prev) || pressed(input, KeyCode::KeyW, &prev) {
+                    self.settings_sel = (self.settings_sel + 3) % 4;
+                }
+                if pressed(input, KeyCode::ArrowDown, &prev) || pressed(input, KeyCode::KeyS, &prev) {
+                    self.settings_sel = (self.settings_sel + 1) % 4;
+                }
+                let mut sact: Option<usize> = None;
+                for (k, idx) in [(KeyCode::Digit1, 0), (KeyCode::Digit2, 1), (KeyCode::Digit3, 2), (KeyCode::Digit4, 3)] {
+                    if pressed(input, k, &prev) {
+                        sact = Some(idx);
+                    }
+                }
+                if pressed(input, KeyCode::Enter, &prev) || pressed(input, KeyCode::Space, &prev) {
+                    sact = Some(self.settings_sel);
+                }
+                // mouse over the 4 settings rows
+                {
+                    let s = ui_scale(context);
+                    let ws = window_size(context);
+                    let scx = ws.x * 0.5;
+                    let srows_y = ws.y * 0.38;
+                    let rects: Vec<(f32, f32, f32, f32)> = (0..4)
+                        .map(|i| (scx - 350.0 * s, srows_y + i as f32 * 100.0 * s, 700.0 * s, 64.0 * s))
+                        .collect();
+                    if let Some(i) = mouse_list(input, &rects, &mut self.settings_sel, lmb_click) {
+                        sact = Some(i);
+                    }
+                }
+                // Left/Right also flips toggles without leaving the row
+                let flip = pressed(input, KeyCode::ArrowLeft, &prev)
+                    || pressed(input, KeyCode::ArrowRight, &prev)
+                    || pressed(input, KeyCode::KeyA, &prev)
+                    || pressed(input, KeyCode::KeyD, &prev);
+                if pressed(input, KeyCode::Escape, &prev) || pressed(input, KeyCode::KeyP, &prev) {
+                    self.settings_open = false;
+                } else if let Some(i) = sact {
+                    if i == 3 {
+                        self.settings_open = false;
+                        self.pause_sig.clear();
+                    } else {
+                        self.flip_setting(context, i);
+                    }
+                } else if flip && self.settings_sel < 3 {
+                    self.flip_setting(context, self.settings_sel);
+                }
+                self.inner.prev_keys = down;
+                self.sync_ground_colors(context);
+                self.ensure_visuals(context);
+                self.sync_visuals(context);
+                self.sync_floats(context);
+                self.sync_pause(context);
+                self.sync_settings(context);
+                self.sync_path(context);
+                self.sync_story(context);
+            self.inner.hud_timer -= dt;
+            if self.inner.hud_timer <= 0.0 {
+                self.update_hud(context);
+                self.inner.hud_timer = 0.12;
+            }
+            return Ok(());
+        }
             if pressed(input, KeyCode::ArrowUp, &prev) || pressed(input, KeyCode::KeyW, &prev) {
-                self.pause_sel = (self.pause_sel + 2) % 3;
+                self.pause_sel = (self.pause_sel + 4) % 5;
             }
             if pressed(input, KeyCode::ArrowDown, &prev) || pressed(input, KeyCode::KeyS, &prev) {
-                self.pause_sel = (self.pause_sel + 1) % 3;
+                self.pause_sel = (self.pause_sel + 1) % 5;
             }
             let mut act: Option<usize> = None;
-            for (k, idx) in [(KeyCode::Digit1, 0), (KeyCode::Digit2, 1), (KeyCode::Digit3, 2)] {
+            for (k, idx) in [(KeyCode::Digit1, 0), (KeyCode::Digit2, 1), (KeyCode::Digit3, 2), (KeyCode::Digit4, 3), (KeyCode::Digit5, 4)] {
                 if pressed(input, k, &prev) {
                     act = Some(idx);
                 }
@@ -743,32 +1339,68 @@ impl Plugin for Game {
             if pressed(input, KeyCode::Enter, &prev) || pressed(input, KeyCode::Space, &prev) {
                 act = Some(self.pause_sel);
             }
+            // mouse over the 5 pause rows (same rects as sync_pause)
+            {
+                let s = ui_scale(context);
+                let ws = window_size(context);
+                let pcx = ws.x * 0.5;
+                let prows_y = ws.y * 0.32;
+                let rects: Vec<(f32, f32, f32, f32)> = (0..5)
+                    .map(|i| (pcx - 350.0 * s, prows_y + i as f32 * 84.0 * s, 700.0 * s, 64.0 * s))
+                    .collect();
+                if let Some(i) = mouse_list(input, &rects, &mut self.pause_sel, lmb_click) {
+                    act = Some(i);
+                }
+            }
             if pressed(input, KeyCode::Escape, &prev) || pressed(input, KeyCode::KeyP, &prev) {
-                self.paused = false;
+                if self.settings_open {
+                    self.settings_open = false;
+                    self.pause_sig.clear();
+                } else {
+                    self.paused = false;
+                }
             } else if let Some(i) = act {
                 match i {
                     0 => self.paused = false,
                     1 => {
+                        // story hub: pause yields, saga takes the screen
+                        self.paused = false;
+                        self.story_open = true;
+                    }
+                    2 => {
+                        self.settings_open = true;
+                        self.settings_sel = 0;
+                        self.pause_sig.clear();
+                    }
+                    3 => {
                         // restart the run fresh on the same class
                         self.reset_run(true);
                         self.paused = false;
                         self.inner.log("Run restarted — base nothing, again.".to_string());
                     }
                     _ => {
-                        // quit to the main menu (keeps the class for next run)
-                        self.reset_run(false);
+                        // quit to the main menu: the saga is SUSPENDED, not
+                        // wiped — CONTINUE resumes it, START burns it
+                        self.paused = false;
+                        self.inner.started = false;
+                        self.story_open = false;
+                        self.stats_open = false;
+                        self.settings_open = false;
                         self.set_menu_visible(context, true);
                         self.menu_index = 0;
                     }
                 }
             }
             self.inner.prev_keys = down;
-            // frozen render + pause overlay
+            // frozen render + pause overlay (+ settings hide path when closed)
             self.sync_ground_colors(context);
             self.ensure_visuals(context);
             self.sync_visuals(context);
             self.sync_floats(context);
             self.sync_pause(context);
+            self.sync_settings(context);
+            self.sync_path(context);
+            self.sync_story(context);
             self.inner.hud_timer -= dt;
             if self.inner.hud_timer <= 0.0 {
                 self.update_hud(context);
@@ -778,11 +1410,181 @@ impl Plugin for Game {
         } else if (pressed(input, KeyCode::Escape, &prev) || pressed(input, KeyCode::KeyP, &prev))
             && self.inner.started
             && !self.inner.draft_open
-            && !self.inner.class_open
             && !self.stats_open
+            && !self.story_open
+            && !self.path_open
         {
             self.paused = true;
             self.pause_sel = 0;
+        }
+
+        // --- story hub: frozen saga UI, three columns, stamina breathing ---
+        if self.story_open {
+            // stamina breathes back while you read; sleep pours it back
+            // (a full bar wakes you on its own)
+            {
+                let st = &mut self.inner.story;
+                let rate = if st.sleeping { 1.5 } else { 0.25 };
+                st.stamina = (st.stamina + dt * rate).min(st.max_stamina as f32);
+                if st.sleeping && st.stamina >= st.max_stamina as f32 {
+                    st.sleeping = false;
+                    st.slog("You wake, rested.".to_string());
+                }
+            }
+            // Esc returns to a live run, if one exists
+            if pressed(input, KeyCode::Escape, &prev) && self.inner.story.run_active {
+                self.story_open = false;
+            }
+            let nodes = crate::story::story_nodes();
+            let node_id = self.inner.story.node.clone();
+            let Some(npos) = nodes.iter().position(|n| n.id == node_id) else {
+                self.inner.story.node = "ashes".to_string();
+                self.inner.prev_keys = down;
+                return Ok(());
+            };
+            let p = &self.inner.player;
+            let st = &self.inner.story;
+            let mut best_rank: u8 = 0;
+            for &gi in p.inventory.iter() {
+                if let Some(g) = crate::gu::GU.get(gi) {
+                    best_rank = best_rank.max(g.rank);
+                }
+            }
+            let items = crate::story::visible_choices(
+                &nodes[npos], npos, p.level, self.inner.path,
+                st.sect.as_deref(), &st.flags, &st.counters,
+                st.stamina, p.gold, p.kills, best_rank,
+            );
+            let flat = crate::story::flat_choices(&items);
+            if !flat.is_empty() {
+                self.story_sel = self.story_sel.min(flat.len() - 1);
+                if pressed(input, KeyCode::ArrowUp, &prev) || pressed(input, KeyCode::KeyW, &prev) {
+                    self.story_sel = (self.story_sel + flat.len() - 1) % flat.len();
+                }
+                if pressed(input, KeyCode::ArrowDown, &prev) || pressed(input, KeyCode::KeyS, &prev) {
+                    self.story_sel = (self.story_sel + 1) % flat.len();
+                }
+                // Left/Right (or A/D): hop between columns, keeping the row —
+                // empty columns are skipped, the row clamps to the column
+                let mut hop: Option<i32> = None;
+                if pressed(input, KeyCode::ArrowLeft, &prev) || pressed(input, KeyCode::KeyA, &prev) {
+                    hop = Some(-1);
+                }
+                if pressed(input, KeyCode::ArrowRight, &prev) || pressed(input, KeyCode::KeyD, &prev) {
+                    hop = Some(1);
+                }
+                if let Some(d) = hop {
+                    if let Some(&fi) = flat.get(self.story_sel) {
+                        let cur_col = items[fi].col;
+                        let mut row = 0usize;
+                        for &gj in flat.iter().take(self.story_sel) {
+                            if items[gj].col == cur_col {
+                                row += 1;
+                            }
+                        }
+                        let mut lens = [0usize; 3];
+                        for &gj in flat.iter() {
+                            lens[items[gj].col] += 1;
+                        }
+                        let mut nc = cur_col;
+                        for _ in 0..3 {
+                            nc = ((nc as i32 + d + 3) % 3) as usize;
+                            if lens[nc] > 0 {
+                                break;
+                            }
+                        }
+                        let tr = row.min(lens[nc].saturating_sub(1));
+                        let mut seen = 0usize;
+                        for (ri, &gj) in flat.iter().enumerate() {
+                            if items[gj].col == nc {
+                                if seen == tr {
+                                    self.story_sel = ri;
+                                    break;
+                                }
+                                seen += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            let mut pick: Option<usize> = None;
+            for (k, idx) in [
+                (KeyCode::Digit1, 0), (KeyCode::Digit2, 1), (KeyCode::Digit3, 2),
+                (KeyCode::Digit4, 3), (KeyCode::Digit5, 4), (KeyCode::Digit6, 5),
+                (KeyCode::Digit7, 6), (KeyCode::Digit8, 7), (KeyCode::Digit9, 8),
+            ] {
+                if pressed(input, k, &prev) && idx < flat.len() {
+                    pick = Some(idx);
+                }
+            }
+            if pressed(input, KeyCode::Enter, &prev) || pressed(input, KeyCode::Space, &prev) {
+                if self.story_sel < flat.len() {
+                    pick = Some(self.story_sel);
+                }
+            }
+            // mouse: same layout rects as sync_story + the reincarnate button
+            {
+                let s = ui_scale(context);
+                let ws = window_size(context);
+                let mut counts = [0usize; 3];
+                for &fi in flat.iter() {
+                    counts[items[fi].col] += 1;
+                }
+                let lay = crate::hud::story_layout(ws.x, ws.y, s, counts);
+                let mp = input.mouse_position();
+                // reincarnate corner button
+                let (rx, ry, rw, rh) = lay.reinc_r;
+                if mp.x >= rx && mp.x <= rx + rw && mp.y >= ry && mp.y <= ry + rh {
+                    if lmb_click {
+                        self.do_reincarnate(false);
+                    }
+                } else {
+                    for (ri, &fi) in flat.iter().enumerate() {
+                        if ri >= lay.row_rs.len() || fi >= items.len() {
+                            break;
+                        }
+                        let (rx, ry, rw, rh) = lay.row_rs[ri];
+                        // click-only: hovering never steals the selection
+                        if mp.x >= rx && mp.x <= rx + rw && mp.y >= ry && mp.y <= ry + rh
+                            && lmb_click
+                        {
+                            self.story_sel = ri;
+                            pick = Some(ri);
+                        }
+                    }
+                }
+            }
+            if let Some(ri) = pick {
+                if let Some(&fi) = flat.get(ri) {
+                    if let Some(it) = items.get(fi) {
+                        if it.col == 2 {
+                            // locked threads can't be pulled — name it, spend nothing
+                            self.inner.story.slog("That thread is not yet within reach.".to_string());
+                        } else if let Some(ch) = nodes[npos].choices.get(it.choice_idx).cloned() {
+                            self.apply_story_choice(&node_id, &ch);
+                        }
+                    }
+                }
+            }
+            self.inner.prev_keys = down;
+            // frozen render + saga overlay on top
+            self.sync_ground_colors(context);
+            self.ensure_visuals(context);
+            self.sync_visuals(context);
+            self.sync_floats(context);
+            self.sync_menu(context);
+            self.sync_path(context);
+            self.sync_draft(context);
+            self.sync_pause(context);
+            self.sync_settings(context);
+            self.sync_stats(context);
+            self.sync_story(context);
+            self.inner.hud_timer -= dt;
+            if self.inner.hud_timer <= 0.0 {
+                self.update_hud(context);
+                self.inner.hud_timer = 0.12;
+            }
+            return Ok(());
         }
 
         // --- movement: WASD only (arrow keys shoot — see below) ---
@@ -909,8 +1711,7 @@ impl Plugin for Game {
                 self.inner.floats.push(FloatText { pos: pp, life: 0.9, text: format!("+{:.0}", dmax * 0.45) });
             }
         }
-        // NOTE: no more free class switching — classes evolve at level
-        // checkpoints (5/10/15...) via the class draft.
+        // NOTE: no classes — worms are the build. Milestones come as Gu boons.
 
         // --- sim tick ---
         // kill hit-stop: freeze the world a beat so impacts land (bosses longer)
@@ -1232,10 +2033,10 @@ impl Plugin for Game {
                     self.inner.floats.push(FloatText { pos: pk_pos, life: 0.9, text: format!("+{:.0}", amt) });
                     self.inner.burst(pk_pos, (255, 100, 110), 8, 3.0, 0.5, 0.2);
                 }
-                PickupKind::Mana => {
+                PickupKind::Essence => {
                     let d = self.inner.player.derived();
-                    self.inner.player.mp = (self.inner.player.mp + d.max_mp * 0.5).min(d.max_mp);
-                    self.inner.log("Mana surge!".to_string());
+                    self.inner.player.essence = (self.inner.player.essence + d.max_essence * 0.5).min(d.max_essence);
+                    self.inner.log("Essence surge!".to_string());
                     self.inner.burst(pk_pos, (100, 160, 255), 8, 3.0, 0.5, 0.2);
                 }
                 PickupKind::Gold => {
@@ -1278,7 +2079,10 @@ impl Plugin for Game {
                     let s = self.inner.next_seed();
                     let r = (s % 100) as u32;
                     if r < 5 {
-                        if let Some(w) = roll_loot(self.inner.player.kills + 20, self.inner.player.base_attrs.luck + 5, s) {
+                        // Gu weapon: rank scales with depth, capped at 5
+                        let rank = ((2 + self.inner.player.level / 10).clamp(2, 5)) as u8;
+                        let idx = random_gu_rank(rank, rank, s);
+                        if let Some(w) = gu_weapon(idx, s) {
                             let label = self.inner.equip_weapon(w);
                             self.inner.log(format!("WEAPON: {} joins! (auto-fires)", label));
                         } else {
@@ -1286,10 +2090,10 @@ impl Plugin for Game {
                             self.inner.log("Chest: dusty... +40g".to_string());
                         }
                     } else if r < 10 {
-                        let idx = random_item_of(roll_item_rarity(s), s / 7 + 3);
-                        let label = self.inner.player.grant_item(idx);
-                        let def = &ITEMS[idx];
-                        self.inner.log(format!("ITEM: {} {} — {}", def.rarity.name(), label, def.desc));
+                        let idx = random_gu_of(roll_item_rarity(s), s / 7 + 3);
+                        let label = self.inner.player.grant_gu(idx);
+                        let def = &GU[idx];
+                        self.inner.log(format!("ITEM: {} {} — {}", rank_rarity(def.rank).name(), label, def.desc));
                     } else {
                         self.inner.player.gold += 30 + self.inner.player.level * 2;
                         self.inner.player.potions = (self.inner.player.potions + 1).min(9);
@@ -1300,8 +2104,8 @@ impl Plugin for Game {
                 PickupKind::Shrine => {
                     self.inner.player.shield_hp = 35.0 + self.inner.player.level as f32 * 3.0;
                     self.inner.player.shield_timer = 20.0;
-                    self.inner.player.mp = self.inner.player.derived().max_mp;
-                    self.inner.log("Shrine blessing: shield + full mana!".to_string());
+                    self.inner.player.essence = self.inner.player.derived().max_essence;
+                    self.inner.log("Shrine blessing: shield + full essence!".to_string());
                     self.inner.burst(pk_pos, (140, 255, 190), 14, 3.5, 0.8, 0.24);
                 }
             }
@@ -1327,16 +2131,89 @@ impl Plugin for Game {
             self.banner_timer = 3.5;
         }
 
-        // death / respawn — forgiving, fun
+        // duel victory: the ring empties, the purse pays, back to the saga
+        if self.inner.duel.as_ref().map(|d| d.started).unwrap_or(false) && self.inner.enemies.is_empty() {
+            if let Some(duel) = self.inner.duel.clone() {
+                self.inner.player.gold += duel.reward_stones;
+                let ups = self.inner.player.add_xp(duel.reward_xp);
+                self.inner.handle_level_ups(ups);
+                let mut extra = String::new();
+                if duel.reward_rank > 0 {
+                    let s = self.inner.next_seed();
+                    let own = self.inner.path.unwrap_or(0);
+                    let pool = crate::gu::gu_of_path_rank(own, duel.reward_rank);
+                    let idx = if pool.is_empty() {
+                        crate::gu::random_gu_rank(duel.reward_rank, duel.reward_rank, s)
+                    } else {
+                        pool[(s as usize) % pool.len()]
+                    };
+                    let got = self.inner.player.grant_gu(idx);
+                    if let Some(w) = crate::gu::gu_weapon(idx, s) {
+                        self.inner.equip_weapon(w);
+                    }
+                    extra = format!(" A worm crawls to the victor: {got}.");
+                }
+                self.inner.story.slog(format!(
+                    "VICTORY over {}! +{} stones, +{} XP.{}",
+                    duel.title, duel.reward_stones, duel.reward_xp, extra
+                ));
+                self.inner.duel = None;
+                self.inner.started = false;
+                self.story_open = true;
+            }
+        }
+
+        // death ends the run — unless a set synergy cheats it. The sect drags
+        // your corpse home. Path, heirloom, endings, and soul-bound Gu
+        // survive; everything else burns.
         if self.inner.player.hp <= 0.0 {
-            self.inner.log(format!("You fell... respawning with {}g lost. Kills: {}", (self.inner.player.gold / 4).min(50), self.inner.player.kills));
-            self.inner.player.gold = self.inner.player.gold.saturating_sub((self.inner.player.gold / 4).min(50));
-            let d = self.inner.player.derived();
-            self.inner.player.hp = d.max_hp;
-            self.inner.player.mp = d.max_mp;
-            self.inner.player_pos = (0.0, 0.0);
-            self.inner.enemies.retain(|e| e.boss); // clear trash, keep boss drama
-            self.inner.player.combo_count = 0;
+            if !self.inner.player.revive_used && self.inner.player.item_totals().revive {
+                self.inner.player.revive_used = true;
+                let d = self.inner.player.derived();
+                self.inner.player.hp = d.max_hp * 0.6;
+                self.inner.player.essence = d.max_essence;
+                self.inner.log("DEATH CHEATED! A completed set drags you back.".to_string());
+                self.inner.story.slog("Death came — and a completed set refused it.".to_string());
+                self.inner.burst(self.inner.player_pos, (255, 240, 200), 30, 7.0, 1.0, 0.3);
+            } else {
+            let kills = self.inner.player.kills;
+            let (path, heir, ends) = (self.inner.path, self.inner.player.heirloom_mult, self.inner.player.endings);
+            let inv = self.inner.player.inventory.clone();
+            let seen = self.inner.seen_syn.clone();
+            let load = self.inner.loadout.clone();
+            self.inner = GameInner::default();
+            self.inner.path = path;
+            self.inner.player.heirloom_mult = heir;
+            self.inner.player.endings = ends;
+            self.inner.player.inventory = inv;
+            self.inner.seen_syn = seen;
+            let n = load.len();
+            self.inner.loadout = load;
+            self.inner.auto_cd = vec![0.5; n];
+            self.inner.started = false;
+            self.story_open = true;
+            self.paused = false;
+            self.stats_open = false;
+            self.inner.story.slog(format!("You died with {kills} kills to your name. The mountain keeps the rest."));
+            self.inner.prev_keys = down;
+            self.sync_ground_colors(context);
+            self.ensure_visuals(context);
+            self.sync_visuals(context);
+            self.sync_floats(context);
+            self.sync_menu(context);
+            self.sync_path(context);
+            self.sync_draft(context);
+            self.sync_pause(context);
+            self.sync_settings(context);
+            self.sync_stats(context);
+            self.sync_story(context);
+            self.inner.hud_timer -= dt;
+            if self.inner.hud_timer <= 0.0 {
+                self.update_hud(context);
+                self.inner.hud_timer = 0.12;
+            }
+            return Ok(());
+            } // end else (true death) — the revive branch above just heals
         }
 
         // Enter: if boss dead recently, jump to next zone feel (gain bonus level progress)
@@ -1404,6 +2281,10 @@ impl Plugin for Game {
         self.ensure_visuals(context);
         self.sync_visuals(context);
         self.sync_floats(context);
+        // overlay hide-paths: story/path widgets park here when their
+        // branches aren't running (all sig-gated, ~free when idle)
+        self.sync_path(context);
+        self.sync_story(context);
         self.inner.hud_timer -= dt;
         if self.inner.hud_timer <= 0.0 {
             self.update_hud(context);
